@@ -498,6 +498,106 @@ def analyse_email(email: Dict) -> Dict:
 #  STREAMLIT UI
 # =============================================================
 
+
+# =============================================================
+#  GMAIL LIVE INTEGRATION FUNCTIONS
+# =============================================================
+
+import json
+import base64
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+
+GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+
+def get_gmail_client_config():
+    return {
+        "installed": {
+            "client_id"                  : st.secrets["gmail"]["client_id"],
+            "client_secret"              : st.secrets["gmail"]["client_secret"],
+            "project_id"                 : st.secrets["gmail"]["project_id"],
+            "auth_uri"                   : "https://accounts.google.com/o/oauth2/auth",
+            "token_uri"                  : "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "redirect_uris"              : ["urn:ietf:wg:oauth:2.0:oob"],
+        }
+    }
+
+def get_auth_url():
+    config   = get_gmail_client_config()
+    flow     = Flow.from_client_config(config, scopes=GMAIL_SCOPES,
+                                       redirect_uri="urn:ietf:wg:oauth:2.0:oob")
+    auth_url, _ = flow.authorization_url(access_type='offline',
+                                          include_granted_scopes='true',
+                                          prompt='consent')
+    return auth_url, flow
+
+def exchange_code_for_token(flow, auth_code):
+    flow.fetch_token(code=auth_code.strip())
+    return flow.credentials
+
+def _get_parts(payload):
+    parts = []
+    if 'parts' in payload:
+        for part in payload['parts']:
+            parts.extend(_get_parts(part))
+    else:
+        parts.append(payload)
+    return parts
+
+def _extract_body(payload):
+    if 'parts' in payload:
+        for part in payload['parts']:
+            if part['mimeType'] == 'text/plain':
+                data = part['body'].get('data', '')
+                if data:
+                    return base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+        for part in payload['parts']:
+            result = _extract_body(part)
+            if result:
+                return result
+    else:
+        data = payload['body'].get('data', '')
+        if data:
+            return base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+    return ''
+
+def _extract_urls(text):
+    return re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+', text)
+
+def _extract_email(sender_str):
+    match = re.search(r'<(.+?)>', sender_str)
+    return match.group(1) if match else sender_str
+
+def fetch_gmail_emails(creds, max_results=10):
+    service  = build('gmail', 'v1', credentials=creds)
+    results  = service.users().messages().list(userId='me',
+                                                maxResults=max_results,
+                                                labelIds=['INBOX']).execute()
+    messages = results.get('messages', [])
+    emails   = []
+    for msg in messages:
+        raw     = service.users().messages().get(userId='me', id=msg['id'],
+                                                  format='full').execute()
+        headers = {h['name']: h['value'] for h in raw['payload']['headers']}
+        subject = headers.get('Subject', '(No Subject)')
+        sender  = headers.get('From', '')
+        body    = _extract_body(raw['payload'])
+        urls    = _extract_urls(body)
+        att_list = [{'filename': p['filename']}
+                    for p in _get_parts(raw['payload']) if p.get('filename')]
+        emails.append({
+            'id'          : msg['id'],
+            'subject'     : subject[:100],
+            'sender_email': _extract_email(sender),
+            'sender_name' : sender,
+            'body_text'   : body[:2000],
+            'urls'        : urls,
+            'attachments' : att_list,
+        })
+    return emails
+
 st.set_page_config(
     page_title="PhishAlert AI Agent System",
     page_icon="🛡️",
@@ -817,135 +917,4 @@ with tab4:
                     st.markdown("**Recommendations:**")
                     for rec in response['recommendations']:
                         st.write(f"  • {rec}")
-
-
-# =============================================================
-#  GMAIL LIVE INTEGRATION FUNCTIONS (appended below UI)
-# =============================================================
-#  OAuth 2.0 flow using manual auth code (works on Streamlit Cloud)
-# =============================================================
-
-import json
-import base64
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
-
-GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
-
-def get_gmail_client_config():
-    """Load Gmail client config from Streamlit secrets."""
-    return {
-        "installed": {
-            "client_id"                  : st.secrets["gmail"]["client_id"],
-            "client_secret"              : st.secrets["gmail"]["client_secret"],
-            "project_id"                 : st.secrets["gmail"]["project_id"],
-            "auth_uri"                   : "https://accounts.google.com/o/oauth2/auth",
-            "token_uri"                  : "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "redirect_uris"              : ["urn:ietf:wg:oauth:2.0:oob"],
-        }
-    }
-
-def get_auth_url() -> str:
-    """Generate the Google OAuth authorization URL."""
-    config = get_gmail_client_config()
-    flow   = Flow.from_client_config(
-        config,
-        scopes=GMAIL_SCOPES,
-        redirect_uri="urn:ietf:wg:oauth:2.0:oob"
-    )
-    auth_url, _ = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true',
-        prompt='consent'
-    )
-    return auth_url, flow
-
-def exchange_code_for_token(flow, auth_code: str) -> Credentials:
-    """Exchange authorization code for credentials."""
-    flow.fetch_token(code=auth_code.strip())
-    return flow.credentials
-
-def fetch_gmail_emails(creds: Credentials, max_results: int = 10) -> list:
-    """Fetch recent emails from Gmail inbox."""
-    service = build('gmail', 'v1', credentials=creds)
-    results = service.users().messages().list(
-        userId='me',
-        maxResults=max_results,
-        labelIds=['INBOX']
-    ).execute()
-
-    messages = results.get('messages', [])
-    emails   = []
-
-    for msg in messages:
-        raw = service.users().messages().get(
-            userId='me',
-            id=msg['id'],
-            format='full'
-        ).execute()
-
-        headers = {h['name']: h['value'] for h in raw['payload']['headers']}
-        subject = headers.get('Subject', '(No Subject)')
-        sender  = headers.get('From', '')
-        body    = _extract_body(raw['payload'])
-        urls    = _extract_urls(body)
-        has_att = any(p.get('filename') for p in _get_parts(raw['payload']))
-        att_list = [
-            {'filename': p['filename']}
-            for p in _get_parts(raw['payload'])
-            if p.get('filename')
-        ]
-
-        emails.append({
-            'id'          : msg['id'],
-            'subject'     : subject[:100],
-            'sender_email': _extract_email(sender),
-            'sender_name' : sender,
-            'body_text'   : body[:2000],
-            'urls'        : urls,
-            'attachments' : att_list,
-        })
-
-    return emails
-
-def _extract_email(sender_str: str) -> str:
-    """Extract email address from 'Name <email>' format."""
-    import re
-    match = re.search(r'<(.+?)>', sender_str)
-    return match.group(1) if match else sender_str
-
-def _get_parts(payload) -> list:
-    """Recursively get all parts of an email."""
-    parts = []
-    if 'parts' in payload:
-        for part in payload['parts']:
-            parts.extend(_get_parts(part))
-    else:
-        parts.append(payload)
-    return parts
-
-def _extract_body(payload) -> str:
-    """Extract plain text body from email payload."""
-    if 'parts' in payload:
-        for part in payload['parts']:
-            if part['mimeType'] == 'text/plain':
-                data = part['body'].get('data', '')
-                if data:
-                    return base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-        for part in payload['parts']:
-            result = _extract_body(part)
-            if result:
-                return result
-    else:
-        data = payload['body'].get('data', '')
-        if data:
-            return base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-    return ''
-
-def _extract_urls(text: str) -> list:
-    """Extract URLs from email body."""
-    import re
-    return re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+', text)
 
