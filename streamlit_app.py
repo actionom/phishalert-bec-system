@@ -11,7 +11,6 @@ Attachment Rule:
     Any email with attachments → Human Expert Review
     (regardless of AI verdict)
 
-
 Module  : MSc Cybersecurity Technology
 Uni     : Northumbria University
 """
@@ -519,16 +518,15 @@ st.markdown("""
 st.markdown('<div class="main-title">🛡️ PhishAlert AI Agent System</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="subtitle">Multi-Agent Phishing Detection &nbsp;|&nbsp; '
-    'MSc Cybersecurity Technology &nbsp;|&nbsp; Northumbria University &nbsp;|&nbsp; '
-    'Opoku — w25035430</div>', unsafe_allow_html=True
+    'MSc Cybersecurity Technology &nbsp;|&nbsp; Northumbria University</div>',
+    unsafe_allow_html=True
 )
 
 # ── Sidebar ───────────────────────────────────────────────────
 
 with st.sidebar:
     st.markdown("### ⚙️ System v2.2.0")
-    st.info("**Classes:** PHISHING | LEGITIMATE\n\n**Attachment Rule:** Any email with an attachment is always escalated to Human Expert Review.")
-    st.markdown("### 🤖 Agent Pipeline")
+    st.info("**Classes:** PHISHING | LEGITIMATE\n\n**Attachment Rule:** Any email with an attachment is always escalated to Human Expert Review.")    st.markdown("### 🤖 Agent Pipeline")
     st.markdown("**Agent 1** → Classifies email text\n\n**Agent 2** → Enriches with intelligence\n\n**Agent 3** → Applies attachment rule & delivers verdict")
     st.markdown("### 📋 Decision Logic")
     st.markdown("""
