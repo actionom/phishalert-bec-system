@@ -541,7 +541,7 @@ with st.sidebar:
 
 # ── Tabs ──────────────────────────────────────────────────────
 
-tab1, tab2, tab3 = st.tabs(["🔍 Analyse Email", "📧 Test Scenarios", "📊 Statistics"])
+tab1, tab2, tab3, tab4 = st.tabs(["🔍 Analyse Email", "📧 Test Scenarios", "📊 Statistics", "📬 Live Gmail"])
 
 # TAB 1 — Analyse Email
 with tab1:
@@ -688,3 +688,264 @@ with tab3:
             st.write(f"{icon}{att} `{h['action']}` — {h['subject']} *(at {h['timestamp']})*")
     else:
         st.info("No emails analysed yet. Run some scenarios in Tab 2.")
+
+# TAB 4 — Live Gmail
+with tab4:
+    st.markdown("### 📬 Live Gmail Analysis")
+    st.caption("Connect your Gmail account to analyse real emails through the PhishAlert pipeline.")
+
+    # Initialise session state
+    if 'gmail_creds'    not in st.session_state: st.session_state.gmail_creds    = None
+    if 'gmail_flow'     not in st.session_state: st.session_state.gmail_flow     = None
+    if 'gmail_auth_url' not in st.session_state: st.session_state.gmail_auth_url = None
+    if 'live_results'   not in st.session_state: st.session_state.live_results   = []
+
+    # ── Not connected yet ────────────────────────────────────
+    if st.session_state.gmail_creds is None:
+
+        st.info("Click the button below to connect your Gmail account. You will be taken to Google's sign-in page, then brought back here.")
+
+        if st.button("🔗 Connect Gmail Account", type="primary", use_container_width=True):
+            try:
+                auth_url, flow = get_auth_url()
+                st.session_state.gmail_flow     = flow
+                st.session_state.gmail_auth_url = auth_url
+            except Exception as e:
+                st.error(f"Could not generate auth URL: {e}")
+
+        if st.session_state.gmail_auth_url:
+            st.markdown("---")
+            st.markdown("### Step 1 — Open this link to sign in with Google")
+            st.markdown(f"[👉 Click here to sign in with Google]({st.session_state.gmail_auth_url})")
+            st.caption("Sign in, allow access, then copy the code Google gives you.")
+
+            st.markdown("### Step 2 — Paste the code here")
+            auth_code = st.text_input("Paste your Google authorisation code here:", placeholder="4/0AX4XfW...")
+
+            if st.button("✅ Submit Code & Connect", type="primary", use_container_width=True):
+                if auth_code:
+                    try:
+                        creds = exchange_code_for_token(st.session_state.gmail_flow, auth_code)
+                        st.session_state.gmail_creds = creds
+                        st.success("✅ Gmail connected successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Authentication failed: {e}. Please try connecting again.")
+                else:
+                    st.warning("Please paste the authorisation code first.")
+
+    # ── Connected ────────────────────────────────────────────
+    else:
+        st.success("✅ Gmail is connected and ready.")
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            num_emails = st.slider("How many emails to fetch and analyse?", 1, 20, 5)
+        with col2:
+            if st.button("🔓 Disconnect Gmail"):
+                st.session_state.gmail_creds    = None
+                st.session_state.gmail_flow     = None
+                st.session_state.gmail_auth_url = None
+                st.session_state.live_results   = []
+                st.rerun()
+
+        if st.button("🔍 Fetch & Analyse My Emails", type="primary", use_container_width=True):
+            with st.spinner(f"Fetching {num_emails} emails from your inbox..."):
+                try:
+                    emails = fetch_gmail_emails(st.session_state.gmail_creds, max_results=num_emails)
+                    results = []
+                    for email in emails:
+                        response = analyse_email(email)
+                        results.append({'email': email, 'response': response})
+                    st.session_state.live_results = results
+                    st.success(f"✅ Analysed {len(results)} emails successfully!")
+                except Exception as e:
+                    st.error(f"Error fetching emails: {e}")
+                    st.session_state.gmail_creds = None
+
+        # ── Display Results ──────────────────────────────────
+        if st.session_state.live_results:
+            st.markdown("---")
+            st.markdown(f"### Results — {len(st.session_state.live_results)} Emails Analysed")
+
+            # Summary counts
+            phishing_count = sum(1 for r in st.session_state.live_results if r['response']['classification']['is_threat'])
+            human_count    = sum(1 for r in st.session_state.live_results if r['response']['action'] == 'HUMAN_REVIEW')
+            legit_count    = len(st.session_state.live_results) - phishing_count
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("🔴 Phishing Detected", phishing_count)
+            c2.metric("✅ Legitimate",         legit_count)
+            c3.metric("🟡 Human Review",       human_count)
+
+            st.markdown("---")
+
+            for i, result in enumerate(st.session_state.live_results):
+                email    = result['email']
+                response = result['response']
+                clf      = response['classification']
+                action   = response['action']
+                is_threat = clf['is_threat']
+                has_att   = response['has_attachments']
+
+                # Colour-coded expander
+                if action == 'HUMAN_REVIEW' and is_threat:
+                    icon = "🔴📎"
+                elif action == 'HUMAN_REVIEW':
+                    icon = "🟡📎"
+                elif is_threat:
+                    icon = "🔴"
+                else:
+                    icon = "✅"
+
+                with st.expander(f"{icon} {email['subject'][:70]} — {clf['classification']} ({clf['confidence']:.0%})"):
+                    st.write(f"**From:** {email['sender_name']}")
+                    st.write(f"**Action:** `{action}`")
+                    st.write(f"**Threat Level:** {clf['threat_level']}")
+
+                    if has_att:
+                        att_names = ', '.join(response['attachment_names'])
+                        st.warning(f"📎 Attachment(s): {att_names} — Flagged for Human Expert Review")
+
+                    st.markdown(f"**Verdict:**\n\n{response['verdict_message']}")
+
+                    if clf['indicators']:
+                        st.markdown("**Indicators detected:**")
+                        for ind in clf['indicators']:
+                            st.write(f"  ⚠️ {ind}")
+
+                    st.markdown("**Recommendations:**")
+                    for rec in response['recommendations']:
+                        st.write(f"  • {rec}")
+
+
+# =============================================================
+#  GMAIL LIVE INTEGRATION FUNCTIONS (appended below UI)
+# =============================================================
+#  OAuth 2.0 flow using manual auth code (works on Streamlit Cloud)
+# =============================================================
+
+import json
+import base64
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+
+GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+
+def get_gmail_client_config():
+    """Load Gmail client config from Streamlit secrets."""
+    return {
+        "installed": {
+            "client_id"                  : st.secrets["gmail"]["client_id"],
+            "client_secret"              : st.secrets["gmail"]["client_secret"],
+            "project_id"                 : st.secrets["gmail"]["project_id"],
+            "auth_uri"                   : "https://accounts.google.com/o/oauth2/auth",
+            "token_uri"                  : "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "redirect_uris"              : ["urn:ietf:wg:oauth:2.0:oob"],
+        }
+    }
+
+def get_auth_url() -> str:
+    """Generate the Google OAuth authorization URL."""
+    config = get_gmail_client_config()
+    flow   = Flow.from_client_config(
+        config,
+        scopes=GMAIL_SCOPES,
+        redirect_uri="urn:ietf:wg:oauth:2.0:oob"
+    )
+    auth_url, _ = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='consent'
+    )
+    return auth_url, flow
+
+def exchange_code_for_token(flow, auth_code: str) -> Credentials:
+    """Exchange authorization code for credentials."""
+    flow.fetch_token(code=auth_code.strip())
+    return flow.credentials
+
+def fetch_gmail_emails(creds: Credentials, max_results: int = 10) -> list:
+    """Fetch recent emails from Gmail inbox."""
+    service = build('gmail', 'v1', credentials=creds)
+    results = service.users().messages().list(
+        userId='me',
+        maxResults=max_results,
+        labelIds=['INBOX']
+    ).execute()
+
+    messages = results.get('messages', [])
+    emails   = []
+
+    for msg in messages:
+        raw = service.users().messages().get(
+            userId='me',
+            id=msg['id'],
+            format='full'
+        ).execute()
+
+        headers = {h['name']: h['value'] for h in raw['payload']['headers']}
+        subject = headers.get('Subject', '(No Subject)')
+        sender  = headers.get('From', '')
+        body    = _extract_body(raw['payload'])
+        urls    = _extract_urls(body)
+        has_att = any(p.get('filename') for p in _get_parts(raw['payload']))
+        att_list = [
+            {'filename': p['filename']}
+            for p in _get_parts(raw['payload'])
+            if p.get('filename')
+        ]
+
+        emails.append({
+            'id'          : msg['id'],
+            'subject'     : subject[:100],
+            'sender_email': _extract_email(sender),
+            'sender_name' : sender,
+            'body_text'   : body[:2000],
+            'urls'        : urls,
+            'attachments' : att_list,
+        })
+
+    return emails
+
+def _extract_email(sender_str: str) -> str:
+    """Extract email address from 'Name <email>' format."""
+    import re
+    match = re.search(r'<(.+?)>', sender_str)
+    return match.group(1) if match else sender_str
+
+def _get_parts(payload) -> list:
+    """Recursively get all parts of an email."""
+    parts = []
+    if 'parts' in payload:
+        for part in payload['parts']:
+            parts.extend(_get_parts(part))
+    else:
+        parts.append(payload)
+    return parts
+
+def _extract_body(payload) -> str:
+    """Extract plain text body from email payload."""
+    if 'parts' in payload:
+        for part in payload['parts']:
+            if part['mimeType'] == 'text/plain':
+                data = part['body'].get('data', '')
+                if data:
+                    return base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+        for part in payload['parts']:
+            result = _extract_body(part)
+            if result:
+                return result
+    else:
+        data = payload['body'].get('data', '')
+        if data:
+            return base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+    return ''
+
+def _extract_urls(text: str) -> list:
+    """Extract URLs from email body."""
+    import re
+    return re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+', text)
+
