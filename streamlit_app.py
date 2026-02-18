@@ -509,7 +509,11 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
-GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+GMAIL_SCOPES = [
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.modify',
+    'https://www.googleapis.com/auth/gmail.labels',
+]
 
 def get_gmail_client_config():
     return {
