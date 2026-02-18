@@ -11,7 +11,7 @@ Attachment Rule:
     Any email with attachments → Human Expert Review
     (regardless of AI verdict)
 
-Student : Opoku | ID: w25035430
+
 Module  : MSc Cybersecurity Technology
 Uni     : Northumbria University
 """
