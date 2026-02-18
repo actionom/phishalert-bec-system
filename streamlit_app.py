@@ -526,7 +526,8 @@ st.markdown(
 
 with st.sidebar:
     st.markdown("### ⚙️ System v2.2.0")
-    st.info("**Classes:** PHISHING | LEGITIMATE\n\n**Attachment Rule:** Any email with an attachment is always escalated to Human Expert Review.")    st.markdown("### 🤖 Agent Pipeline")
+    st.info("**Classes:** PHISHING | LEGITIMATE\n\n**Attachment Rule:** Any email with an attachment is always escalated to Human Expert Review.")
+    st.markdown("### 🤖 Agent Pipeline")
     st.markdown("**Agent 1** → Classifies email text\n\n**Agent 2** → Enriches with intelligence\n\n**Agent 3** → Applies attachment rule & delivers verdict")
     st.markdown("### 📋 Decision Logic")
     st.markdown("""
